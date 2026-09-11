@@ -22,14 +22,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Generate Wrapper & Build with Debug Logs
+      - name: Generate Wrapper Gradle 8.9 & Build
         run: |
-          gradle wrapper --gradle-version 8.5
+          gradle wrapper --gradle-version 8.9
           chmod +x gradlew
-          ./gradlew assembleDebug --info --stacktrace
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK Artifact
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
