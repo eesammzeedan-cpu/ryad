@@ -19,19 +19,16 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Grant execute permission for gradlew
-        run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x gradlew
-          fi
+      - name: Setup Gradle 8.5
+        uses: gradle/gradle-build-action@v2
+        with:
+          gradle-version: '8.5'
 
-      - name: Build APK with System Gradle
+      - name: Generate Wrapper and Build APK
         run: |
-          if [ -f "./gradlew" ]; then
-            ./gradlew assembleDebug --stacktrace
-          else
-            gradle assembleDebug --stacktrace
-          fi
+          gradle wrapper --gradle-version 8.5
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
