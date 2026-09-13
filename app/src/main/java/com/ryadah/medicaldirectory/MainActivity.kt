@@ -3,9 +3,12 @@ package com.ryadah.medicaldirectory
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.os.Environment
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
@@ -13,6 +16,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.provider.MediaStore
 import android.widget.Toast
 import java.io.OutputStream
 
@@ -43,7 +47,12 @@ class MainActivity : Activity() {
             displayZoomControls = false
         }
 
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                webView.evaluateJavascript("window.RYADAH_ANDROID_APP=true;", null)
+            }
+        }
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 view: WebView?,
@@ -84,16 +93,20 @@ class MainActivity : Activity() {
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
                 try {
-                    // Prefer the regular WhatsApp application when installed.
-                    send.setPackage("com.whatsapp")
-                    startActivity(send)
-                } catch (_: ActivityNotFoundException) {
+                    // فتح واتساب مباشرة إن كان مثبتًا، ثم الرجوع لقائمة المشاركة عند عدم توفره.
+                    val whatsapp = Intent(send).apply { setPackage("com.whatsapp") }
                     try {
-                        send.setPackage(null)
-                        startActivity(Intent.createChooser(send, "مشاركة الخدمة"))
-                    } catch (_: Exception) {
-                        Toast.makeText(this@MainActivity, "لا يوجد تطبيق مناسب للمشاركة", Toast.LENGTH_SHORT).show()
-                    }
+                        startActivity(whatsapp)
+                        return@runOnUiThread
+                    } catch (_: ActivityNotFoundException) { }
+                    val business = Intent(send).apply { setPackage("com.whatsapp.w4b") }
+                    try {
+                        startActivity(business)
+                        return@runOnUiThread
+                    } catch (_: ActivityNotFoundException) { }
+                    startActivity(Intent.createChooser(send, "مشاركة الخدمة"))
+                } catch (_: Exception) {
+                    Toast.makeText(this@MainActivity, "لا يوجد تطبيق مناسب للمشاركة", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -139,16 +152,37 @@ class MainActivity : Activity() {
                 pendingDownloadMime = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
                 pendingDownloadBytes = bytes
 
-                runOnUiThread {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     try {
-                        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE)
-                            type = pendingDownloadMime
-                            putExtra(Intent.EXTRA_TITLE, pendingDownloadName)
+                        val values = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, pendingDownloadName)
+                            put(MediaStore.Downloads.MIME_TYPE, pendingDownloadMime)
+                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                            put(MediaStore.Downloads.IS_PENDING, 1)
                         }
-                        startActivityForResult(intent, CREATE_DOCUMENT_REQUEST)
+                        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        if (uri == null) throw IllegalStateException("تعذر إنشاء ملف التنزيل")
+                        contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                            ?: throw IllegalStateException("تعذر فتح ملف التنزيل")
+                        val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+                        contentResolver.update(uri, done, null, null)
+                        pendingDownloadBytes = null
+                        runOnUiThread { Toast.makeText(this@MainActivity, "تم تنزيل المرفق إلى مجلد التنزيلات", Toast.LENGTH_SHORT).show() }
                     } catch (_: Exception) {
-                        Toast.makeText(this@MainActivity, "تعذر فتح نافذة حفظ المرفق", Toast.LENGTH_SHORT).show()
+                        runOnUiThread { Toast.makeText(this@MainActivity, "تعذر تنزيل المرفق", Toast.LENGTH_SHORT).show() }
+                    }
+                } else {
+                    runOnUiThread {
+                        try {
+                            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = pendingDownloadMime
+                                putExtra(Intent.EXTRA_TITLE, pendingDownloadName)
+                            }
+                            startActivityForResult(intent, CREATE_DOCUMENT_REQUEST)
+                        } catch (_: Exception) {
+                            Toast.makeText(this@MainActivity, "تعذر فتح نافذة حفظ المرفق", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }.start()
